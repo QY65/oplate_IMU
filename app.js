@@ -499,20 +499,51 @@ function addLogRow() {
   drawChart();
 }
 
-// ── 下載工具：電腦用一般下載，iPad/iPhone 用分享選單 ─────────
+// ── 下載工具 ──────────────────────────────────────────
+// 電腦：一般下載
+// iPad / iPhone：先試分享選單，不行就跳出視窗（圖片可長按儲存，CSV 可複製）
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-async function saveBlob(blob, filename) {
-  // iPad / iPhone：不支援 download 屬性，改用分享選單（可存到「檔案」）
-  if (isIOS && navigator.canShare) {
-    const file = new File([blob], filename, { type: blob.type });
-    if (navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: filename }); return; }
-      catch (e) { if (e.name === 'AbortError') return; /* 其他錯誤就往下試一般下載 */ }
+// 跳出視窗：content 是一個 DOM 元素
+function showModal(title, hint, content, buttons = []) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:14px;padding:16px;max-width:520px;width:100%;max-height:90vh;display:flex;flex-direction:column;gap:10px;overflow:hidden';
+  box.innerHTML = `<div style="font-weight:700;font-size:15px">${title}</div>
+                   <div style="font-size:12px;color:#4a5568">${hint}</div>`;
+  content.style.flex = '1';
+  box.appendChild(content);
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+  [...buttons, { label: '關閉', onClick: () => overlay.remove() }].forEach(b => {
+    const btn = document.createElement('button');
+    btn.textContent = b.label;
+    btn.style.cssText = 'padding:8px 16px;border-radius:8px;border:1px solid #d0d7e2;background:#f8f9fb;font-size:13px;font-weight:600;cursor:pointer';
+    btn.onclick = b.onClick;
+    row.appendChild(btn);
+  });
+  box.appendChild(row);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+async function saveBlob(blob, filename, fallback) {
+  if (isIOS) {
+    // 1) 分享選單（可存到「檔案」或「照片」）
+    if (navigator.canShare) {
+      const file = new File([blob], filename, { type: blob.type });
+      if (navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: filename }); return; }
+        catch (e) { if (e.name === 'AbortError') return; }
+      }
     }
+    // 2) 分享不能用 → 跳出視窗
+    fallback();
+    return;
   }
-  // 一般下載：<a> 要先放進頁面再點，而且不能馬上釋放網址
+  // 電腦：<a> 要先放進頁面再點，網址延遲釋放
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -527,9 +558,21 @@ $('btn-export').addEventListener('click', () => {
   if (!angleLog.length) return;
   const csv = 'time,delta_p1,delta_p2,delta_joint,abs_p1,abs_p2,abs_joint\n' +
     angleLog.map(r => `${r.time},${r.dp1},${r.dp2},${r.djoint},${r.p1},${r.p2},${r.joint}`).join('\n');
-  // 前面加 BOM，Excel 開啟才不會亂碼
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
-  saveBlob(blob, `oplate_${Date.now()}.csv`);
+
+  saveBlob(blob, `oplate_${Date.now()}.csv`, () => {
+    const ta = document.createElement('textarea');
+    ta.readOnly = true;
+    ta.value = csv;
+    ta.style.cssText = 'width:100%;min-height:200px;font-size:12px;font-family:monospace;border:1px solid #e2e6ec;border-radius:8px;padding:8px';
+    showModal('CSV 資料', '按「複製」後，貼到「備忘錄」或傳給自己，再用 Excel 開啟。', ta, [{
+      label: '複製',
+      onClick: async () => {
+        try { await navigator.clipboard.writeText(csv); }
+        catch { ta.select(); document.execCommand('copy'); }
+      }
+    }]);
+  });
 });
 
 $('btn-export-chart').addEventListener('click', () => {
@@ -543,7 +586,15 @@ $('btn-export-chart').addEventListener('click', () => {
   offCtx.fillStyle = '#ffffff';
   offCtx.fillRect(0, 0, cCvs.width, cCvs.height);
   drawChart(offCtx);
+  const dataUrl = offscreen.toDataURL('image/png');
+
   offscreen.toBlob(blob => {
-    if (blob) saveBlob(blob, `oplate_chart_${Date.now()}.png`);
+    if (!blob) return;
+    saveBlob(blob, `oplate_chart_${Date.now()}.png`, () => {
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.style.cssText = 'width:100%;object-fit:contain;border:1px solid #e2e6ec;border-radius:8px;overflow:auto';
+      showModal('折線圖', '長按圖片，選「加入照片」或「儲存圖片」。', img);
+    });
   }, 'image/png');
 });
