@@ -477,7 +477,13 @@ function addLogRow() {
   const {pitch:p2} = s1 ? calcAngleCorrect(s1) : {pitch:0};
   const joint = +(p1 - p2).toFixed(1); // 有正負號的夾角，不取絕對值
 
-  const base = zeroBase ?? { p1, p2, joint:0 };
+  // 沒按過歸零：把第一筆紀錄當基準，之後每筆都跟它比
+  if (!zeroBase) {
+    zeroBase = { p1, p2, joint: Math.abs(p1 - p2) };
+    $('zero-hint').textContent = `基準：${time}（開始紀錄時）　P1=${p1}°　P2=${p2}°`;
+    $('zero-hint').style.color = '#7c3aed';
+  }
+  const base = zeroBase;
   const dp1   = +(p1 - base.p1).toFixed(1);
   const dp2   = +(p2 - base.p2).toFixed(1);
   const djoint = +(joint - (base.p1 - base.p2)).toFixed(1);
