@@ -498,15 +498,38 @@ function addLogRow() {
   body.appendChild(row); body.scrollTop=body.scrollHeight;
   drawChart();
 }
+
+// ── 下載工具：電腦用一般下載，iPad/iPhone 用分享選單 ─────────
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+async function saveBlob(blob, filename) {
+  // iPad / iPhone：不支援 download 屬性，改用分享選單（可存到「檔案」）
+  if (isIOS && navigator.canShare) {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: filename }); return; }
+      catch (e) { if (e.name === 'AbortError') return; /* 其他錯誤就往下試一般下載 */ }
+    }
+  }
+  // 一般下載：<a> 要先放進頁面再點，而且不能馬上釋放網址
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 $('btn-export').addEventListener('click', () => {
   if (!angleLog.length) return;
-  const csv='time,delta_p1,delta_p2,delta_joint,abs_p1,abs_p2,abs_joint\n'+
-    angleLog.map(r=>`${r.time},${r.dp1},${r.dp2},${r.djoint},${r.p1},${r.p2},${r.joint}`).join('\n');
-  const a=Object.assign(document.createElement('a'),{
-    href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})),
-    download:`oplate_${Date.now()}.csv`
-  });
-  a.click(); URL.revokeObjectURL(a.href);
+  const csv = 'time,delta_p1,delta_p2,delta_joint,abs_p1,abs_p2,abs_joint\n' +
+    angleLog.map(r => `${r.time},${r.dp1},${r.dp2},${r.djoint},${r.p1},${r.p2},${r.joint}`).join('\n');
+  // 前面加 BOM，Excel 開啟才不會亂碼
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  saveBlob(blob, `oplate_${Date.now()}.csv`);
 });
 
 $('btn-export-chart').addEventListener('click', () => {
@@ -519,9 +542,8 @@ $('btn-export-chart').addEventListener('click', () => {
   offCtx.scale(scale, scale);
   offCtx.fillStyle = '#ffffff';
   offCtx.fillRect(0, 0, cCvs.width, cCvs.height);
-  drawChart(offCtx);  // 用高解析 ctx 重繪
-  const a = document.createElement('a');
-  a.href = offscreen.toDataURL('image/png');
-  a.download = `oplate_chart_${Date.now()}.png`;
-  a.click();
+  drawChart(offCtx);
+  offscreen.toBlob(blob => {
+    if (blob) saveBlob(blob, `oplate_chart_${Date.now()}.png`);
+  }, 'image/png');
 });
